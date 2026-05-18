@@ -193,11 +193,12 @@ async def update_profile(
 async def list_users(authorization: str = Header(None)):
     ctx = await get_current_user(authorization)
     current_id = ctx["user"]["id"]
+    token = ctx["token"]
 
     async with httpx.AsyncClient() as client:
         r = await client.get(
             f"{SUPABASE_URL}/rest/v1/profiles?id=neq.{current_id}&select=id,display_name,bio",
-            headers=anon_headers(),
+            headers=auth_headers(token),
         )
 
     if r.status_code != 200:
@@ -268,15 +269,19 @@ async def get_feed(authorization: str = Header(None)):
     h = auth_headers(token) if token else anon_headers()
 
     async with httpx.AsyncClient() as client:
-        posts_r, likes_r = await asyncio.gather(
+        posts_r, likes_r, profiles_r = await asyncio.gather(
             client.get(
                 f"{SUPABASE_URL}/rest/v1/posts"
-                f"?select=id,content,created_at,user_id,profiles(display_name)"
+                f"?select=id,content,created_at,user_id"
                 f"&order=created_at.desc",
                 headers=h,
             ),
             client.get(
                 f"{SUPABASE_URL}/rest/v1/likes?select=post_id,user_id",
+                headers=h,
+            ),
+            client.get(
+                f"{SUPABASE_URL}/rest/v1/profiles?select=id,display_name",
                 headers=h,
             ),
         )
@@ -286,6 +291,9 @@ async def get_feed(authorization: str = Header(None)):
 
     posts = posts_r.json()
     likes = likes_r.json() if likes_r.status_code == 200 else []
+    profiles = profiles_r.json() if profiles_r.status_code == 200 else []
+
+    profile_map: dict[str, str] = {p["id"]: p["display_name"] for p in profiles}
 
     # Build like_count and liked_by_me per post
     like_counts: dict[str, int] = {}
@@ -300,8 +308,7 @@ async def get_feed(authorization: str = Header(None)):
         pid = post["id"]
         post["like_count"] = like_counts.get(pid, 0)
         post["liked_by_me"] = pid in liked_by_me
-        post["display_name"] = (post.get("profiles") or {}).get("display_name", "Unknown")
-        post.pop("profiles", None)
+        post["display_name"] = profile_map.get(post["user_id"], "Unknown")
 
     return {"data": posts, "error": None}
 
