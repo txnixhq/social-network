@@ -86,7 +86,6 @@ class LoginRequest(BaseModel):
 @app.post("/auth/signup")
 async def signup(body: SignupRequest):
     async with httpx.AsyncClient() as client:
-        # Create Supabase Auth user
         r = await client.post(
             f"{SUPABASE_URL}/auth/v1/signup",
             headers=anon_headers(),
@@ -102,7 +101,6 @@ async def signup(body: SignupRequest):
         if not user_id:
             return {"data": None, "error": "Signup failed — no user id returned"}
 
-        # Insert profile row using the user's own token so RLS passes
         profile_headers = auth_headers(token) if token else anon_headers()
         pr = await client.post(
             f"{SUPABASE_URL}/rest/v1/profiles",
@@ -207,3 +205,139 @@ async def list_users(authorization: str = Header(None)):
     return {"data": r.json(), "error": None}
 
 
+# ---------------------------------------------------------------------------
+# Posts
+# ---------------------------------------------------------------------------
+
+class CreatePostRequest(BaseModel):
+    content: str
+
+
+@app.post("/posts")
+async def create_post(body: CreatePostRequest, authorization: str = Header(None)):
+    ctx = await get_current_user(authorization)
+    user_id = ctx["user"]["id"]
+    token = ctx["token"]
+
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{SUPABASE_URL}/rest/v1/posts",
+            headers={**auth_headers(token), "Prefer": "return=representation"},
+            json={"user_id": user_id, "content": body.content},
+        )
+
+    if r.status_code not in (200, 201):
+        return {"data": None, "error": r.text}
+    data = r.json()
+    return {"data": data[0] if data else {}, "error": None}
+
+
+@app.delete("/posts/{post_id}")
+async def delete_post(post_id: str, authorization: str = Header(None)):
+    ctx = await get_current_user(authorization)
+    user_id = ctx["user"]["id"]
+    token = ctx["token"]
+
+    async with httpx.AsyncClient() as client:
+        r = await client.delete(
+            f"{SUPABASE_URL}/rest/v1/posts?id=eq.{post_id}&user_id=eq.{user_id}",
+            headers=auth_headers(token),
+        )
+
+    if r.status_code not in (200, 204):
+        return {"data": None, "error": r.text}
+    return {"data": {"deleted": True}, "error": None}
+
+
+# ---------------------------------------------------------------------------
+# Feed
+# ---------------------------------------------------------------------------
+
+@app.get("/feed")
+async def get_feed(authorization: str = Header(None)):
+    # Auth is optional — liked_by_me requires it
+    current_id = None
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        async with httpx.AsyncClient() as client:
+            ur = await client.get(f"{SUPABASE_URL}/auth/v1/user", headers=auth_headers(token))
+        if ur.status_code == 200:
+            current_id = ur.json().get("id")
+
+    h = auth_headers(token) if token else anon_headers()
+
+    async with httpx.AsyncClient() as client:
+        posts_r, likes_r = await asyncio.gather(
+            client.get(
+                f"{SUPABASE_URL}/rest/v1/posts"
+                f"?select=id,content,created_at,user_id,profiles(display_name)"
+                f"&order=created_at.desc",
+                headers=h,
+            ),
+            client.get(
+                f"{SUPABASE_URL}/rest/v1/likes?select=post_id,user_id",
+                headers=h,
+            ),
+        )
+
+    if posts_r.status_code != 200:
+        return {"data": None, "error": posts_r.text}
+
+    posts = posts_r.json()
+    likes = likes_r.json() if likes_r.status_code == 200 else []
+
+    # Build like_count and liked_by_me per post
+    like_counts: dict[str, int] = {}
+    liked_by_me: set[str] = set()
+    for like in likes:
+        pid = like["post_id"]
+        like_counts[pid] = like_counts.get(pid, 0) + 1
+        if current_id and like["user_id"] == current_id:
+            liked_by_me.add(pid)
+
+    for post in posts:
+        pid = post["id"]
+        post["like_count"] = like_counts.get(pid, 0)
+        post["liked_by_me"] = pid in liked_by_me
+        post["display_name"] = (post.get("profiles") or {}).get("display_name", "Unknown")
+        post.pop("profiles", None)
+
+    return {"data": posts, "error": None}
+
+
+# ---------------------------------------------------------------------------
+# Likes
+# ---------------------------------------------------------------------------
+
+@app.post("/likes/{post_id}")
+async def toggle_like(post_id: str, authorization: str = Header(None)):
+    ctx = await get_current_user(authorization)
+    user_id = ctx["user"]["id"]
+    token = ctx["token"]
+
+    async with httpx.AsyncClient() as client:
+        # Check if like already exists
+        check = await client.get(
+            f"{SUPABASE_URL}/rest/v1/likes?user_id=eq.{user_id}&post_id=eq.{post_id}&select=user_id",
+            headers=auth_headers(token),
+        )
+        existing = check.json() if check.status_code == 200 else []
+
+        if existing:
+            r = await client.delete(
+                f"{SUPABASE_URL}/rest/v1/likes?user_id=eq.{user_id}&post_id=eq.{post_id}",
+                headers=auth_headers(token),
+            )
+            liked = False
+        else:
+            r = await client.post(
+                f"{SUPABASE_URL}/rest/v1/likes",
+                headers={**auth_headers(token), "Prefer": "return=representation"},
+                json={"user_id": user_id, "post_id": post_id},
+            )
+            liked = True
+
+    if r.status_code not in (200, 201, 204):
+        return {"data": None, "error": r.text}
+    return {"data": {"liked": liked}, "error": None}

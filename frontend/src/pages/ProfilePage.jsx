@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-export default function ProfilePage({ userId, token, on401 }) {
+export default function ProfilePage({ userId, token, on401, isOwnProfile = true }) {
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
@@ -82,12 +82,14 @@ export default function ProfilePage({ userId, token, on401 }) {
                   <p className="text-gray-500 text-sm mt-1">{profile.bio}</p>
                 )}
               </div>
-              <button
-                onClick={() => setEditing(true)}
-                className="text-sm text-gray-500 border border-gray-200 rounded-lg px-3 py-1.5 hover:text-gray-800 hover:border-gray-400 transition-colors"
-              >
-                Edit
-              </button>
+              {isOwnProfile && (
+                <button
+                  onClick={() => setEditing(true)}
+                  className="text-sm text-gray-500 border border-gray-200 rounded-lg px-3 py-1.5 hover:text-gray-800 hover:border-gray-400 transition-colors"
+                >
+                  Edit
+                </button>
+              )}
             </div>
 
             <div className="flex gap-6 text-sm text-gray-500 border-t border-gray-100 pt-4 mt-4">
