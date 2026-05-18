@@ -7,7 +7,7 @@ import PeoplePage from './pages/PeoplePage'
 export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem('token'))
   const [userId, setUserId] = useState(() => localStorage.getItem('userId'))
-  const [view, setView] = useState('feed') // 'feed' | 'profile' | 'people' | 'user'
+  const [view, setView] = useState('feed')
   const [viewingUserId, setViewingUserId] = useState(null)
 
   useEffect(() => {
@@ -48,19 +48,21 @@ export default function App() {
     { key: 'people', label: 'People' },
   ]
 
+  const activeKey = view === 'user' ? 'people' : view
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-        <span className="text-xl font-bold text-gray-900">Social</span>
-        <div className="flex items-center gap-6">
+    <div className="min-h-screen bg-[#F8FAFC]">
+      <nav className="bg-white border-b border-[#E2E8F0] px-6 flex items-center justify-between h-14">
+        <span className="text-lg font-semibold text-[#185FA5]">Social</span>
+        <div className="flex items-center h-full">
           {navItems.map(({ key, label }) => (
             <button
               key={key}
               onClick={() => setView(key)}
-              className={`text-sm font-medium transition-colors ${
-                view === key || (view === 'user' && key === 'people')
-                  ? 'text-gray-900'
-                  : 'text-gray-400 hover:text-gray-700'
+              className={`h-full px-4 text-sm font-medium border-b-2 transition-colors ${
+                activeKey === key
+                  ? 'text-[#185FA5] border-[#185FA5]'
+                  : 'text-gray-400 border-transparent hover:text-[#185FA5]'
               }`}
             >
               {label}
@@ -68,7 +70,7 @@ export default function App() {
           ))}
           <button
             onClick={handleLogout}
-            className="text-sm text-gray-400 hover:text-gray-700 transition-colors"
+            className="ml-4 text-sm text-gray-400 hover:text-[#185FA5] transition-colors"
           >
             Log out
           </button>
@@ -80,13 +82,25 @@ export default function App() {
           <Feed token={token} userId={userId} on401={handle401} onViewProfile={viewUserProfile} />
         )}
         {view === 'profile' && (
-          <ProfilePage userId={userId} token={token} on401={handle401} />
+          <ProfilePage
+            userId={userId}
+            currentUserId={userId}
+            token={token}
+            on401={handle401}
+            isOwnProfile={true}
+          />
         )}
         {view === 'people' && (
           <PeoplePage token={token} on401={handle401} onViewProfile={viewUserProfile} />
         )}
         {view === 'user' && (
-          <ProfilePage userId={viewingUserId} token={token} on401={handle401} isOwnProfile={false} />
+          <ProfilePage
+            userId={viewingUserId}
+            currentUserId={userId}
+            token={token}
+            on401={handle401}
+            isOwnProfile={false}
+          />
         )}
       </main>
     </div>

@@ -365,6 +365,59 @@ async def toggle_like(post_id: str, authorization: str = Header(None)):
 
 
 # ---------------------------------------------------------------------------
+# User posts (for profile page)
+# ---------------------------------------------------------------------------
+
+@app.get("/user-posts/{user_id}")
+async def get_user_posts(user_id: str, authorization: str = Header(None)):
+    current_id = None
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        async with httpx.AsyncClient() as client:
+            ur = await client.get(f"{SUPABASE_URL}/auth/v1/user", headers=auth_headers(token))
+        if ur.status_code == 200:
+            current_id = ur.json().get("id")
+
+    h = auth_headers(token) if token else anon_headers()
+
+    async with httpx.AsyncClient() as client:
+        posts_r, likes_r = await asyncio.gather(
+            client.get(
+                f"{SUPABASE_URL}/rest/v1/posts"
+                f"?user_id=eq.{user_id}&select=id,content,created_at,user_id"
+                f"&order=created_at.desc",
+                headers=h,
+            ),
+            client.get(
+                f"{SUPABASE_URL}/rest/v1/likes?select=post_id,user_id",
+                headers=h,
+            ),
+        )
+
+    if posts_r.status_code != 200:
+        return {"data": None, "error": posts_r.text}
+
+    posts = posts_r.json()
+    likes = likes_r.json() if likes_r.status_code == 200 else []
+
+    like_counts: dict[str, int] = {}
+    liked_by_me: set[str] = set()
+    for like in likes:
+        pid = like["post_id"]
+        like_counts[pid] = like_counts.get(pid, 0) + 1
+        if current_id and like["user_id"] == current_id:
+            liked_by_me.add(pid)
+
+    for post in posts:
+        pid = post["id"]
+        post["like_count"] = like_counts.get(pid, 0)
+        post["liked_by_me"] = pid in liked_by_me
+
+    return {"data": posts, "error": None}
+
+
+# ---------------------------------------------------------------------------
 # Follows
 # ---------------------------------------------------------------------------
 
