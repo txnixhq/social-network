@@ -17,7 +17,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "https://*.railway.app",
+        "https://social-network-production-d62b.up.railway.app",
+        "https://ravishing-peace-production-10af.up.railway.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
