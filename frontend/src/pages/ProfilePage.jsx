@@ -10,10 +10,14 @@ export default function ProfilePage({ userId, token, on401, isOwnProfile = true 
   const [bio, setBio] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState(null)
+  const [following, setFollowing] = useState(false)
+  const [followLoading, setFollowLoading] = useState(false)
 
   useEffect(() => {
+    setEditing(false)
     fetchProfile()
-  }, [userId])
+    if (!isOwnProfile) fetchFollowState()
+  }, [userId, isOwnProfile])
 
   async function fetchProfile() {
     setLoading(true)
@@ -24,6 +28,32 @@ export default function ProfilePage({ userId, token, on401, isOwnProfile = true 
     setDisplayName(data?.display_name || '')
     setBio(data?.bio || '')
     setLoading(false)
+  }
+
+  async function fetchFollowState() {
+    const r = await fetch(`${API}/follows`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (r.status === 401) { on401(); return }
+    const { data } = await r.json()
+    setFollowing((data || []).includes(userId))
+  }
+
+  async function handleFollowToggle() {
+    setFollowLoading(true)
+    const method = following ? 'DELETE' : 'POST'
+    const r = await fetch(`${API}/follow/${userId}`, {
+      method,
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (r.status === 401) { on401(); return }
+    const { error } = await r.json()
+    if (!error) {
+      const delta = following ? -1 : 1
+      setFollowing(!following)
+      setProfile((p) => ({ ...p, follower_count: (p.follower_count ?? 0) + delta }))
+    }
+    setFollowLoading(false)
   }
 
   async function handleSave(e) {
@@ -82,12 +112,25 @@ export default function ProfilePage({ userId, token, on401, isOwnProfile = true 
                   <p className="text-gray-500 text-sm mt-1">{profile.bio}</p>
                 )}
               </div>
-              {isOwnProfile && (
+
+              {isOwnProfile ? (
                 <button
                   onClick={() => setEditing(true)}
                   className="text-sm text-gray-500 border border-gray-200 rounded-lg px-3 py-1.5 hover:text-gray-800 hover:border-gray-400 transition-colors"
                 >
                   Edit
+                </button>
+              ) : (
+                <button
+                  onClick={handleFollowToggle}
+                  disabled={followLoading}
+                  className={`text-sm font-medium rounded-lg px-4 py-1.5 transition-colors disabled:opacity-50 ${
+                    following
+                      ? 'border border-gray-300 text-gray-600 hover:border-red-300 hover:text-red-500'
+                      : 'bg-gray-900 text-white hover:bg-gray-700'
+                  }`}
+                >
+                  {followLoading ? '…' : following ? 'Following' : 'Follow'}
                 </button>
               )}
             </div>

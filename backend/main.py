@@ -268,11 +268,26 @@ async def get_feed(authorization: str = Header(None)):
 
     h = auth_headers(token) if token else anon_headers()
 
+    # Determine which posts to show based on follows
+    following_ids: list[str] = []
+    if current_id:
+        async with httpx.AsyncClient() as client:
+            follows_r = await client.get(
+                f"{SUPABASE_URL}/rest/v1/follows?follower_id=eq.{current_id}&select=following_id",
+                headers=h,
+            )
+        if follows_r.status_code == 200:
+            following_ids = [f["following_id"] for f in follows_r.json()]
+
+    discovery_mode = len(following_ids) == 0
+    posts_filter = "" if discovery_mode else f"&user_id=in.({','.join(following_ids)})"
+
     async with httpx.AsyncClient() as client:
         posts_r, likes_r, profiles_r = await asyncio.gather(
             client.get(
                 f"{SUPABASE_URL}/rest/v1/posts"
                 f"?select=id,content,created_at,user_id"
+                f"{posts_filter}"
                 f"&order=created_at.desc",
                 headers=h,
             ),
@@ -295,7 +310,6 @@ async def get_feed(authorization: str = Header(None)):
 
     profile_map: dict[str, str] = {p["id"]: p["display_name"] for p in profiles}
 
-    # Build like_count and liked_by_me per post
     like_counts: dict[str, int] = {}
     liked_by_me: set[str] = set()
     for like in likes:
@@ -310,7 +324,7 @@ async def get_feed(authorization: str = Header(None)):
         post["liked_by_me"] = pid in liked_by_me
         post["display_name"] = profile_map.get(post["user_id"], "Unknown")
 
-    return {"data": posts, "error": None}
+    return {"data": {"posts": posts, "discovery_mode": discovery_mode}, "error": None}
 
 
 # ---------------------------------------------------------------------------
@@ -348,3 +362,64 @@ async def toggle_like(post_id: str, authorization: str = Header(None)):
     if r.status_code not in (200, 201, 204):
         return {"data": None, "error": r.text}
     return {"data": {"liked": liked}, "error": None}
+
+
+# ---------------------------------------------------------------------------
+# Follows
+# ---------------------------------------------------------------------------
+
+@app.get("/follows")
+async def get_follows(authorization: str = Header(None)):
+    """Returns the list of user_ids the current user is following."""
+    ctx = await get_current_user(authorization)
+    user_id = ctx["user"]["id"]
+    token = ctx["token"]
+
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{SUPABASE_URL}/rest/v1/follows?follower_id=eq.{user_id}&select=following_id",
+            headers=auth_headers(token),
+        )
+
+    if r.status_code != 200:
+        return {"data": None, "error": r.text}
+    following_ids = [f["following_id"] for f in r.json()]
+    return {"data": following_ids, "error": None}
+
+
+@app.post("/follow/{target_id}")
+async def follow_user(target_id: str, authorization: str = Header(None)):
+    ctx = await get_current_user(authorization)
+    user_id = ctx["user"]["id"]
+    token = ctx["token"]
+
+    if user_id == target_id:
+        return {"data": None, "error": "Cannot follow yourself"}
+
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{SUPABASE_URL}/rest/v1/follows",
+            headers={**auth_headers(token), "Prefer": "return=representation"},
+            json={"follower_id": user_id, "following_id": target_id},
+        )
+
+    if r.status_code not in (200, 201):
+        return {"data": None, "error": r.text}
+    return {"data": {"following": True}, "error": None}
+
+
+@app.delete("/follow/{target_id}")
+async def unfollow_user(target_id: str, authorization: str = Header(None)):
+    ctx = await get_current_user(authorization)
+    user_id = ctx["user"]["id"]
+    token = ctx["token"]
+
+    async with httpx.AsyncClient() as client:
+        r = await client.delete(
+            f"{SUPABASE_URL}/rest/v1/follows?follower_id=eq.{user_id}&following_id=eq.{target_id}",
+            headers=auth_headers(token),
+        )
+
+    if r.status_code not in (200, 204):
+        return {"data": None, "error": r.text}
+    return {"data": {"following": False}, "error": None}

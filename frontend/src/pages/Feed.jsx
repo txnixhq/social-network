@@ -12,6 +12,7 @@ function timeAgo(iso) {
 
 export default function Feed({ token, userId, on401, onViewProfile }) {
   const [posts, setPosts] = useState([])
+  const [discoveryMode, setDiscoveryMode] = useState(false)
   const [loading, setLoading] = useState(true)
   const [content, setContent] = useState('')
   const [posting, setPosting] = useState(false)
@@ -28,7 +29,8 @@ export default function Feed({ token, userId, on401, onViewProfile }) {
     })
     if (r.status === 401) { on401(); return }
     const { data } = await r.json()
-    setPosts(data || [])
+    setPosts(data?.posts || [])
+    setDiscoveryMode(data?.discovery_mode ?? true)
     setLoading(false)
   }
 
@@ -65,7 +67,6 @@ export default function Feed({ token, userId, on401, onViewProfile }) {
   }
 
   async function handleLike(postId, liked) {
-    // Optimistic update
     setPosts((prev) =>
       prev.map((p) =>
         p.id === postId
@@ -73,13 +74,11 @@ export default function Feed({ token, userId, on401, onViewProfile }) {
           : p
       )
     )
-
     const r = await fetch(`${API}/likes/${postId}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     })
     if (r.status === 401) { on401(); return }
-    // If it failed, revert
     const { error } = await r.json()
     if (error) {
       setPosts((prev) =>
@@ -114,6 +113,14 @@ export default function Feed({ token, userId, on401, onViewProfile }) {
           </button>
         </div>
       </form>
+
+      {/* Discovery mode notice */}
+      {!loading && discoveryMode && (
+        <div className="text-center text-sm text-gray-400 bg-white border border-gray-200 rounded-2xl px-5 py-4 mb-6">
+          Follow people to see their posts here.{' '}
+          <span className="text-gray-500">Showing all posts for now.</span>
+        </div>
+      )}
 
       {/* Feed */}
       {loading ? (
